@@ -1,7 +1,7 @@
 ---
 title : "Triển Khai Dự Án AWS CDK Kết Nối ECS, EC2, IAM"
 date :  "`r Sys.Date()`" 
-weight : 3
+weight : 4
 chapter : false
 pre : " <b> 2.1.3 </b> "
 ---
@@ -18,16 +18,17 @@ Tài liệu này hướng dẫn cách thiết lập và triển khai một ứng
 ### 🔹 Gỡ bỏ Node.js/NPM cũ (nếu có)
 
 ```bash
-sudo apt remove -y nodejs npm
-sudo apt purge -y nodejs npm
-sudo apt autoremove -y
+sudo yum remove -y nodejs npm
+sudo yum autoremove -y
+
 ```
 
 ### 🔹 Cài đặt NVM và Node.js (Phiên bản ổn định)
 
 ```bash
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.5/install.sh | bash
-source ~/.bashrc
+export NVM_DIR="$HOME/.nvm"
+source "$NVM_DIR/nvm.sh"
 nvm install 22.9.0
 nvm use 22.9.0
 ```
