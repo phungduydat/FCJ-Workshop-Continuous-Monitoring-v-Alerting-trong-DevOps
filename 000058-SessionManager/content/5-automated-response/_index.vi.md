@@ -5,89 +5,174 @@ weight : 5
 chapter : false
 pre : " <b> 5. </b> "
 ---
+---
 
-{{% notice info %}}
-**Port Forwarding** là mốt cách thức hữu ích để chuyển hướng lưu lượng mạng từ 1 địa chỉ IP - Port này sang 1 địa chỉ IP - Port khác. Với **Port Forwarding** chúng ta có thể truy cập một EC2 instance nằm trong private subnet từ máy trạm của chúng ta.
-{{% /notice %}}
+---------------------
 
-Chúng ta sẽ cấu hình **Port Forwarding** cho kết nối RDP giữa máy của mình với **Private Windows Instance** nằm trong private subnet mà chúng ta đã tạo cho bài thực hành này.
+# 🚨 Triển Khai Hệ Thống Cảnh Báo & Leo Thang Sự Cố Chuyên Nghiệp
 
-![port-fwd](/images/arc-04.png) 
+> Mục tiêu: Thiết lập hệ thống giám sát cảnh báo theo cấp độ, có khả năng tự động phát hiện bất thường, gửi thông báo phù hợp theo mức độ nghiêm trọng và tự động phản ứng nếu cần.
 
+---
 
+## 📌 1. Thiết Kế Quy Trình Cảnh Báo 3 Cấp
 
-#### Tạo IAM User có quyền kết nối SSM
+| Cấp độ | Tên                         | Người nhận                   | Thời gian phản hồi | Công cụ      |
+| ------ | --------------------------- | ---------------------------- | ------------------ | ------------ |
+| 1      | Cảnh báo kỹ thuật (DevOps)  | Nhóm DevOps                  | ≤ 15 phút          | Email/SNS    |
+| 2      | Cảnh báo gấp (On-call)      | Dev trực hotline / PagerDuty | ≤ 5 phút           | SNS + Lambda |
+| 3      | Cảnh báo quản lý (Quản trị) | Quản lý cấp cao              | Giờ hành chính     | Email/SMS    |
 
-1. Truy cập vào [giao diện quản trị dịch vụ IAM](https://console.aws.amazon.com/iamv2/home)
-  + Click **Users** , sau đó click **Add users**.
+---
 
-![FWD](/images/5.fwd/001-fwd.png)
+## ✅ 2. Tạo SNS Topic Cho Mỗi Cấp
 
-2. Tại trang **Add user**.
-  + Tại mục **User name**, điền **Portfwd**.
-  + Click chọn **Access key - Programmatic access**.
-  + Click **Next: Permissions**.
-  
-![FWD](/images/5.fwd/002-fwd.png)
-
-3. Click **Attach existing policies directly**.
-  + Tại ô tìm kiếm , điền **ssm**.
-  + Click chọn **AmazonSSMFullAccess**.
-  + Click **Next: Tags**, click **Next: Reviews**.
-  + Click **Create user**.
-
-4. Lưu lại thông tin **Access key ID** và **Secret access key** để thực hiện cấu hình AWS CLI.
-
-#### Cài đặt và cấu hình AWS CLI và Session Manager Plugin 
-  
-Để thực hiện phần thực hành này, đảm bảo máy trạm của bạn đã cài [AWS CLI]() và [Session Manager Plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
-
-Bạn có thể tham khảo thêm bài thực hành về cài đặt và cấu hình AWS CLI [tại đây](https://000011.awsstudygroup.com/).
-
-{{%notice tip%}}
-Với Windows thì khi giải nén thư mục cài đặt **Session Manager Plugin** bạn hãy chạy file **install.bat** với quyền Administrator để thực hiện cài đặt.
-{{%/notice%}}
-
-#### Thực hiện Portforwarding 
-
-1. Chạy command dưới đây trong **Command Prompt** trên máy của bạn để cấu hình **Port Forwarding**.
-
-```
-  aws ssm start-session --target (your ID windows instance) --document-name AWS-StartPortForwardingSession --parameters portNumber="3389",localPortNumber="9999" --region (your region) 
-```
-{{%notice tip%}}
-
-Thông tin **Instance ID** của **Windows Private Instance** có thể tìm được khi bạn xem chi tiết máy chủ EC2 Windows Private Instance.
-
-{{%/notice%}}
-
-  + Câu lệnh ví dụ
-
-```
-C:\Windows\system32>aws ssm start-session --target i-06343d7377486760c --document-name AWS-StartPortForwardingSession --parameters portNumber="3389",localPortNumber="9999" --region ap-southeast-1
+```bash
+aws sns create-topic --name WebEnglishAlert-Level1
+aws sns create-topic --name WebEnglishAlert-Level2
+aws sns create-topic --name WebEnglishAlert-Level3
 ```
 
-{{%notice warning%}}
+### Subscribing Người Nhận
 
-Nếu câu lệnh của bạn báo lỗi như dưới đây : \
-SessionManagerPlugin is not found. Please refer to SessionManager Documentation here: http://docs.aws.amazon.com/console/systems-manager/session-manager-plugin-not-found\
-Chứng tỏ bạn chưa cài Session Manager Plugin thành công. Bạn có thể cần khởi chạy lại **Command Prompt** sau khi cài **Session Manager Plugin**.
+```bash
+# DevOps team
+aws sns subscribe \
+  --topic-arn arn:aws:sns:ap-northeast-1:xxx:WebEnglishAlert-Level1 \
+  --protocol email --notification-endpoint devops@example.com
 
-{{%/notice%}}
+# Quản lý cấp cao
+aws sns subscribe \
+  --topic-arn arn:aws:sns:ap-northeast-1:xxx:WebEnglishAlert-Level3 \
+  --protocol email --notification-endpoint ceo@example.com
+```
 
-2. Kết nối tới **Private Windows Instance** bạn đã tạo bằng công cụ **Remote Desktop** trên máy trạm của bạn.
-  + Tại mục Computer: điền **localhost:9999**.
+---
 
+## ⚙️ 3. Tạo Alarm CPU Với CloudWatch
 
-![FWD](/images/5.fwd/003-fwd.png)
+```bash
+aws cloudwatch put-metric-alarm \
+  --alarm-name CPU-High-Level1 \
+  --metric-name cpu_usage_active \
+  --namespace WebEnglishMetrics \
+  --threshold 80 \
+  --comparison-operator GreaterThanThreshold \
+  --evaluation-periods 1 \
+  --period 300 \
+  --statistic Average \
+  --alarm-actions arn:aws:sns:ap-northeast-1:xxx:WebEnglishAlert-Level1
+```
 
+---
 
-3. Quay trở lại giao diện quản trị của dịch vụ System Manager - Session Manager.
-  + Click tab **Session history**.
-  + Chúng ta sẽ thấy các session logs với tên Document là **AWS-StartPortForwardingSession**.
+## ⚡ 4. Lambda Tự Động Leo Thang Nếu Không Xử Lý
 
+### Bước 1: Tạo IAM Role Cho Lambda
 
-![FWD](/images/5.fwd/004-fwd.png)
+Role cần quyền:
 
+* `cloudwatch:DescribeAlarms`
+* `sns:Publish`
 
-Chúc mừng bạn đã hoàn tất bài thực hành hướng dẫn cách sử dụng Session Manager để kết nối cũng như lưu trữ các session logs trong S3 bucket. Hãy nhớ thực hiện bước dọn dẹp tài nguyên để tránh sinh chi phí ngoài ý muốn nhé.
+### Bước 2: Code Lambda (`alertEscalator`)
+
+```python
+import boto3
+
+def lambda_handler(event, context):
+    cloudwatch = boto3.client('cloudwatch')
+    sns = boto3.client('sns')
+
+    alarm_name = "CPU-High-Level1"
+    resp = cloudwatch.describe_alarms(AlarmNames=[alarm_name])
+    alarm = resp['MetricAlarms'][0]
+
+    if alarm['StateValue'] == "ALARM":
+        sns.publish(
+            TopicArn="arn:aws:sns:ap-northeast-1:xxx:WebEnglishAlert-Level2",
+            Subject="🚨 Escalation Triggered",
+            Message=f"Cảnh báo cấp 1 chưa được xử lý - {alarm_name}"
+        )
+```
+
+### Bước 3: Gắn Lambda Vào Alarm Level 2
+
+```bash
+aws cloudwatch put-metric-alarm \
+  --alarm-name CPU-High-Level2 \
+  --metric-name cpu_usage_active \
+  --namespace WebEnglishMetrics \
+  --threshold 80 \
+  --evaluation-periods 2 \
+  --period 600 \
+  --statistic Average \
+  --alarm-actions arn:aws:lambda:ap-northeast-1:xxx:function:alertEscalator
+```
+
+---
+
+## 📲 5. Tích Hợp Với PagerDuty
+
+### Bước 1: Tạo Integration Trong PagerDuty
+
+* Vào **PagerDuty > Services > Add Service**
+* Tạo integration kiểu **Amazon CloudWatch**
+* Lấy **Webhook URL**
+
+### Bước 2: Subscribe SNS Với Webhook PagerDuty
+
+```bash
+aws sns subscribe \
+  --topic-arn arn:aws:sns:ap-northeast-1:xxx:WebEnglishAlert-Level2 \
+  --protocol https \
+  --notification-endpoint https://events.pagerduty.com/integration/xyz/enqueue
+```
+
+---
+
+## ⚙️ 6. Cấu Hình CloudWatch Anomaly Detection
+
+```bash
+aws cloudwatch put-anomaly-detector \
+  --namespace WebEnglishMetrics \
+  --metric-name cpu_usage_active \
+  --statistic Average \
+  --dimensions Name=InstanceId,Value=i-xxxxxx
+```
+
+---
+
+## 🔀 7. Optional: AWS Step Functions Phản Hồi Tự Động
+
+Sử dụng Step Functions để:
+
+* Tự động scale service (ECS/Fargate)
+* Gửi lệnh reboot EC2
+* Gửi email cảnh báo theo luồng xử lý
+
+---
+
+## 🧪 8. Kiểm Thử
+
+```bash
+# Làm tăng CPU
+sudo yum install -y stress-ng
+stress-ng --cpu 4 --timeout 1200s
+```
+
+Kiểm tra:
+
+* SNS gửi email/sms thành công
+* Lambda kích hoạt khi chưa xử lý
+* Escalation diễn ra đúng logic
+
+---
+
+## 📘 9. Tổng Kết
+
+* Đảm bảo **cloudwatch alarms hoạt động tốt**
+* **Lambda function** chạy định kỳ kiểm tra trạng thái
+* SNS chia từng cấp cảnh báo rõ ràng
+* Kết hợp PagerDuty cho cảnh báo ngoài giờ
+* Đội ngũ phản hồi theo vai trò và cấp độ

@@ -6,86 +6,118 @@ chapter : false
 pre : " <b> 5. </b> "
 ---
 
-{{% notice info %}}
-**Port Forwarding** is a useful way to redirect network traffic from one IP address - Port to another IP address - Port. With **Port Forwarding** we can access an EC2 instance located in the private subnet from our workstation.
-{{% /notice %}}
+# 📊 Triển Khai Dashboard và Báo Cáo Trực Quan Cho Dự Án WebEnglish
 
-We will configure **Port Forwarding** for the RDP connection between our machine and **Private Windows Instance** located in the private subnet we created for this exercise.
+Tài liệu này cung cấp quy trình chuyên nghiệp và chi tiết để thiết lập các bảng điều khiển (dashboards) và báo cáo giám sát dữ liệu hệ thống trong dự án WebEnglish. Việc giám sát được thực hiện bằng Amazon CloudWatch và Amazon QuickSight để cung cấp khả năng hiển thị thời gian thực cũng như các phân tích chiến lược giúp đội DevOps phản ứng nhanh chóng với sự cố sản phẩm.
 
-![port-fwd](/images/arc-04.png) 
+---
 
-#### Create IAM user with permission to connect SSM
+## 🎯 Mục Tiêu
 
-1. Go to [IAM service management console](https://console.aws.amazon.com/iamv2/home)
-   + Click **Users** , then click **Add users**.
+- Hiển thị hiệu suất hệ thống EC2, container, ứng dụng Spring Boot, và MySQL.
+- Cảnh báo khi có dấu hiệu bất thường dựa trên hành vi (anomaly).
+- Cung cấp báo cáo trực quan định kỳ cho DevOps và quản lý cấp cao.
 
-![FWD](/images/5.fwd/001-fwd.png)
+---
 
-2. At the **Add user** page.
-   + In the **User name** field, enter **Portfwd**.
-   + Click on **Access key - Programmatic access**.
-   + Click **Next: Permissions**.
-  
-![FWD](/images/5.fwd/002-fwd.png)
+## 🛠️ 1. Tạo Dashboard Trên Amazon CloudWatch
 
-3. Click **Attach existing policies directly**.
-   + In the search box, enter **ssm**.
-   + Click on **AmazonSSMFullAccess**.
-   + Click **Next: Tags**, click **Next: Reviews**.
-   + Click **Create user**.
+### ✅ Bước 1: Tạo Dashboard
 
-4. Save **Access key ID** and **Secret access key** information to perform AWS CLI configuration.
+1. Vào **AWS Console > CloudWatch > Dashboards**
+2. Chọn **Create dashboard**
+3. Đặt tên: `WebEnglish-Dashboard`
+4. Chọn loại widget: `Line`, `Number`, `Text`, hoặc `Log query`
 
-#### Install and Configure AWS CLI and Session Manager Plugin
-  
-To perform this hands-on, make sure your workstation has [AWS CLI]() and [Session Manager Plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session) installed -manager-working-with-install-plugin.html)
+### ✅ Bước 2: Thêm Widget Giám Sát
 
-More hands-on tutorials on installing and configuring the AWS CLI can be found [here](https://000011.awsstudygroup.com/).
+#### 1. Widget CPU và Memory EC2
 
-{{%notice tip%}}
-With Windows, when extracting the **Session Manager Plugin** installation folder, run the **install.bat** file with Administrator permission to perform the installation.
-{{%/notice%}}
-
-#### Implement Portforwarding
-
-1. Run the command below in **Command Prompt** on your machine to configure **Port Forwarding**.
-
-```
-   aws ssm start-session --target (your ID windows instance) --document-name AWS-StartPortForwardingSession --parameters portNumber="3389",localPortNumber="9999" --region (your region)
-```
-{{%notice tip%}}
-
-**Windows Private Instance** **Instance ID** information can be found when you view the EC2 Windows Private Instance server details.
-
-{{%/notice%}}
-
-   + Example command:
-
-```
-C:\Windows\system32>aws ssm start-session --target i-06343d7377486760c --document-name AWS-StartPortForwardingSession --parameters portNumber="3389",localPortNumber="9999" --region ap-southeast-1
+```json
+{
+  "type": "metric",
+  "x": 0,
+  "y": 0,
+  "width": 12,
+  "height": 6,
+  "properties": {
+    "metrics": [
+      [ "WebEnglishMetrics", "cpu_usage_active" ],
+      [ "WebEnglishMetrics", "mem_used_percent" ]
+    ],
+    "region": "ap-northeast-1",
+    "title": "Hiệu suất Hệ Thống EC2",
+    "view": "timeSeries",
+    "stacked": false
+  }
+}
 ```
 
-{{%notice warning%}}
+#### 2. Widget Logs Ứng Dụng
 
-If your command gives an error like below: \
-SessionManagerPlugin is not found. Please refer to SessionManager Documentation here: http://docs.aws.amazon.com/console/systems-manager/session-manager-plugin-not-found\
-Prove that you have not successfully installed the Session Manager Plugin. You may need to relaunch **Command Prompt** after installing **Session Manager Plugin**.
+```json
+{
+  "type": "log",
+  "x": 12,
+  "y": 0,
+  "width": 12,
+  "height": 6,
+  "properties": {
+    "query": "SOURCE 'WebEnglishLogs' | filter @logStream like 'app'",
+    "region": "ap-northeast-1",
+    "title": "WebEnglish Application Logs"
+  }
+}
+```
 
-{{%/notice%}}
+---
 
-2. Connect to the **Private Windows Instance** you created using the **Remote Desktop** tool on your workstation.
-   + In the Computer section: enter **localhost:9999**.
+## 📈 2. Phân Tích Báo Cáo Qua Amazon QuickSight
 
+### ✅ Bước 1: Xuất Logs Từ CloudWatch Về Amazon S3
 
-![FWD](/images/5.fwd/003-fwd.png)
+1. Vào **CloudWatch > Log Groups**
+2. Chọn nhóm log `WebEnglishLogs`
+3. Bấm nút `Export data to Amazon S3`
+4. Chọn S3 Bucket (đã tạo trước, ví dụ `webenglish-monitoring-bucket`)
 
+### ✅ Bước 2: Tạo Dataset Trên QuickSight
 
-3. Return to the administration interface of the System Manager - Session Manager service.
-   + Click tab **Session history**.
-   + We will see session logs with Document name **AWS-StartPortForwardingSession**.
+1. Vào **Amazon QuickSight > Manage Data > New Dataset**
+2. Chọn nguồn: `S3`
+3. Nhập manifest.json hoặc đường dẫn trực tiếp tới bucket chứa dữ liệu CloudWatch logs
+4. Tạo bảng dữ liệu `WebEnglishLogData`
 
+### ✅ Bước 3: Tạo Báo Cáo
 
-![FWD](/images/5.fwd/004-fwd.png)
+- Dùng biểu đồ cột: Lỗi phân theo ngày/giờ
+- Dùng biểu đồ đường: Tốc độ truy vấn MySQL, độ trễ ứng dụng
+- Lọc theo từ khóa lỗi: `"ERROR"`, `"Exception"`...
 
+---
 
-Congratulations on completing the lab on how to use Session Manager to connect and store session logs in S3 bucket. Remember to perform resource cleanup to avoid unintended costs.
+## 🧠 3. Chiến Lược Tối Ưu Hóa Cảnh Báo (Reduce False Positives/Negatives)
+
+| Kỹ thuật                    | Mô tả |
+|-----------------------------|-------|
+| **Anomaly Detection**       | Sử dụng CloudWatch Anomaly Detector để tự học hành vi bình thường và phát hiện lệch chuẩn. |
+| **Composite Alarm**         | Kết hợp nhiều chỉ số trong một cảnh báo để tránh cảnh báo sai khi chỉ 1 thành phần lỗi. |
+| **Smoothing / Thống kê**    | Dùng trung bình, phần trăm (P90, P95) để làm mượt dữ liệu và loại bỏ spike ngắn. |
+| **Delay đánh giá**          | Thiết lập `evaluationPeriods` lớn hơn (ví dụ 2–3 lần) để xác nhận tình trạng lỗi. |
+| **Giới hạn lặp cảnh báo**   | Dùng `alarm suppression` để tránh spam nếu lỗi vẫn đang tiếp diễn. |
+
+---
+
+## 🧾 Mẹo Vận Hành
+
+- ⏱️ Giới hạn thời gian giữ logs: `7–14 ngày` để giảm chi phí.
+- 🔔 Cấu hình gửi cảnh báo qua **SNS Topic** tới email hoặc Lambda handler.
+- 🧪 Kết hợp với **AWS DevOps Guru** để tự động phát hiện root cause.
+
+---
+
+## 📚 Tài Liệu Tham Khảo
+
+- [CloudWatch Dashboards](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Dashboards.html)
+- [Amazon QuickSight Getting Started](https://docs.aws.amazon.com/quicksight/latest/user/welcome.html)
+- [Anomaly Detection](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Anomaly_Detection.html)

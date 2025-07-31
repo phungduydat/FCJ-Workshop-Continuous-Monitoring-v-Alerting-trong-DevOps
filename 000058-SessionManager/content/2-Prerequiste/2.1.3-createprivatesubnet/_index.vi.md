@@ -74,7 +74,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 
-export class WebenglishCdkStack extends cdk.Stack {
+export class TestCdkStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
@@ -114,7 +114,7 @@ export class WebenglishCdkStack extends cdk.Stack {
       }),
       portMappings: [{ containerPort: 8080 }],
       environment: {
-        SPRING_DATASOURCE_URL: 'jdbc:mysql://localhost:3306/webenglish',
+        SPRING_DATASOURCE_URL: 'jdbc:mysql:/your-data-base/webenglish',
         SPRING_DATASOURCE_USERNAME: 'root',
         SPRING_DATASOURCE_PASSWORD: '123456',
       },

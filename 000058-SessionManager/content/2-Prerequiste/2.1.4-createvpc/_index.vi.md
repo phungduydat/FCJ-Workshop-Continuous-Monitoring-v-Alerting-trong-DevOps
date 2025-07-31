@@ -36,34 +36,23 @@ java -version
 Tải xuống tệp nhị phân Maven mới nhất (phiên bản **3.9.11** tính đến tháng 7/2025):
 
 ```bash
-sudo wget https://downloads.apache.org/maven/maven-3/3.9.11/binaries/apache-maven-3.9.11-bin.tar.gz
+sudo yum install java-11-amazon-corretto-devel
+wget https://archive.apache.org/dist/maven/maven-3/3.9.1/binaries/apache-maven-3.9.1-bin.tar.gz
 ```
 
 ### 📦 Giải Nén Maven
 
 ```bash
-sudo tar xzvf apache-maven-3.9.11-bin.tar.gz
-sudo mv apache-maven-3.9.11 maven
+sudo yum install java-11-amazon-corretto-devel
+sudo mv apache-maven-3.9.1 /opt/
 ```
 
 ### ⚙️ Cấu Hình Biến Môi Trường
 
 ```bash
-sudo nano /etc/profile.d/maven.sh
-```
-
-Thêm nội dung:
-
-```bash
-export M2_HOME=/opt/maven
-export PATH=${M2_HOME}/bin:${PATH}
-```
-
-Lưu file (`Ctrl+O`, `Enter`) và thoát (`Ctrl+X`), rồi chạy:
-
-```bash
-sudo chmod +x /etc/profile.d/maven.sh
-source /etc/profile.d/maven.sh
+echo 'export M2_HOME=/opt/apache-maven-3.9.1' >> ~/.bashrc
+echo 'export PATH=$PATH:$M2_HOME/bin' >> ~/.bashrc
+source ~/.bashrc
 ```
 
 ### ✅ Kiểm Tra Maven

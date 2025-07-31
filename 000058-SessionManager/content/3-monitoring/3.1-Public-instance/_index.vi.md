@@ -5,43 +5,39 @@ weight : 1
 chapter : false
 pre : " <b> 3.1. </b> "
 ---
+# Hướng Dẫn Thiết Lập Giám Sát Hạ Tầng WebEnglish Trên AWS Linux 2
 
-# Hướng Dẫn Thiết Lập Giám Sát Hạ Tầng WebEnglish
-
-Tài liệu này hướng dẫn chi tiết cách triển khai hệ thống giám sát hạ tầng WebEnglish trên AWS, bao gồm giám sát Amazon EC2, container Docker, ứng dụng Spring Boot và cơ sở dữ liệu MySQL bằng AWS CloudWatch.
+Tài liệu này hướng dẫn chi tiết cách triển khai hệ thống giám sát hạ tầng WebEnglish trên **Amazon Linux 2**, bao gồm EC2, container Docker, ứng dụng Spring Boot và cơ sở dữ liệu MySQL bằng AWS CloudWatch.
 
 ---
 
 ## 1. Mục Tiêu
 
-* Theo dõi hiệu suất hệ thống (CPU, bộ nhớ, đĩa) của EC2 và container Docker.
-* Thu thập nhật ký từ ứng dụng Spring Boot và MySQL.
-* Thiết lập cảnh báo theo thời gian thực.
-* Xây dựng dashboard trực quan hỗ trợ nhóm DevOps.
+* Giám sát hiệu suất (CPU, RAM, Disk) trên EC2.
+* Thu thập log ứng dụng Spring Boot và MySQL.
+* Cảnh báo qua SNS.
+* Hiển thị dashboard trực quan với CloudWatch.
 
 **Công cụ chính:** AWS CloudWatch, CloudWatch Agent, Amazon SNS.
 
 ---
 
-## 2. Yêu Cầu Chuẩn Bị
+## 2. Chuẩn Bị
 
-### Hệ Thống:
+### EC2 Instance
 
-* AWS Account với quyền IAM phù hợp.
-* EC2 instance (Amazon Linux 2/Ubuntu, cỡ t2.medium), cài Docker và Spring Boot.
-* Docker Compose triển khai Spring Boot + MySQL.
+* Amazon Linux 2
+* Cài Docker, Docker Compose, Java (Spring Boot), MySQL
 
-### Quyền IAM:
+### Quyền IAM cần thiết
 
-* EC2: `CloudWatchAgentServerPolicy`, `AmazonSSMManagedInstanceCore`.
-* CloudWatch: `cloudwatch:PutMetricData`, quyền ghi log.
+Attach IAM Role có:
 
-### Công Cụ:
+* `CloudWatchAgentServerPolicy`
+* `AmazonSSMManagedInstanceCore`
+* Quyền ghi log và metric vào CloudWatch
 
-* AWS CLI, AWS CDK (tuỳ chọn).
-* Kiến thức cơ bản về EC2, Docker, CloudWatch.
-
-### Cài Đặt AWS CLI:
+### Cài AWS CLI (nếu chưa có)
 
 ```bash
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
@@ -52,33 +48,29 @@ aws --version
 
 ---
 
-## 3. Triển Khai Chi Tiết
+## 3. Cài Đặt CloudWatch Agent Trên Amazon Linux 2
 
-### 3.1. Cài CloudWatch Agent Trên EC2
-
-#### Bước 1: Cài Đặt
+### Bước 1: Cài Đặt Agent
 
 ```bash
-# Amazon Linux 2
-sudo yum install amazon-cloudwatch-agent -y
-
-# Ubuntu
-sudo apt-get install amazon-cloudwatch-agent -y
+sudo yum install -y amazon-cloudwatch-agent
 ```
 
-Kiểm tra:
+### Bước 2: Cấu hình Agent
 
-```bash
-/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -v
-```
-
-#### Bước 2: Tạo Tệp Cấu Hình
+Chạy wizard tạo file cấu hình:
 
 ```bash
 sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-config-wizard
 ```
 
-#### Cấu Hình Mẫu `/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json`
+> File tạo sẽ lưu ở:
+
+```
+/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+```
+
+### Mẫu File Cấu Hình:
 
 ```json
 {
@@ -89,17 +81,28 @@ sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-config-wizard
   "metrics": {
     "namespace": "WebEnglishMetrics",
     "metrics_collected": {
-      "cpu": { "measurement": ["cpu_usage_active", "cpu_usage_idle"], "totalcpu": true },
-      "mem": { "measurement": ["mem_used_percent", "mem_total"] },
-      "disk": { "measurement": ["disk_used_percent"], "resources": ["/"] }
+      "cpu": { "measurement": ["cpu_usage_active"], "totalcpu": true },
+      "mem": { "measurement": ["mem_used_percent"] },
+      "disk": {
+        "measurement": ["disk_used_percent"],
+        "resources": ["/"]
+      }
     }
   },
   "logs": {
     "logs_collected": {
       "files": {
         "collect_list": [
-          { "file_path": "/var/log/webenglish/app.log", "log_group_name": "WebEnglishLogs", "log_stream_name": "{instance_id}/app.log" },
-          { "file_path": "/var/log/mysql/mysql.log", "log_group_name": "WebEnglishLogs", "log_stream_name": "{instance_id}/mysql.log" }
+          {
+            "file_path": "/var/log/webenglish/app.log",
+            "log_group_name": "WebEnglishLogs",
+            "log_stream_name": "{instance_id}/app"
+          },
+          {
+            "file_path": "/var/log/mysql/mysql.log",
+            "log_group_name": "WebEnglishLogs",
+            "log_stream_name": "{instance_id}/mysql"
+          }
         ]
       }
     }
@@ -107,7 +110,7 @@ sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-config-wizard
 }
 ```
 
-#### Khởi động Agent:
+### Bước 3: Khởi động Agent
 
 ```bash
 sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
@@ -115,69 +118,96 @@ sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
   -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
 ```
 
+Kiểm tra trạng thái:
+
+```bash
+sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a status
+```
+
 ---
 
-### 3.2. Thiết Lập CloudWatch Alarms
+## 4. Thiết Lập Cảnh Báo (Alarm) với SNS
 
-#### Tạo SNS Topic:
+## ✅ Bước 1: Đăng ký Email vào SNS Topic
 
-* SNS > Create Topic: `WebEnglishAlerts`
-* Thêm email DevOps team để nhận thông báo.
+```bash
+aws sns subscribe \
+  --topic-arn arn:aws:sns:ap-northeast-1:466322313916:WebEnglishAlerts \
+  --protocol email \
+  --notification-endpoint your_email@example.com
+```
 
-#### CLI Tạo Alarm:
+> 🔔 Thay `your_email@example.com` bằng email thật bạn muốn nhận cảnh báo.  
+> 📬 Sau đó kiểm tra email và nhấp **"Confirm subscription"** để hoàn tất.
+
+---
+
+## ✅ Bước 2: Tạo CloudWatch Alarm giám sát CPU
 
 ```bash
 aws cloudwatch put-metric-alarm \
   --alarm-name HighCPUUsage \
   --metric-name cpu_usage_active \
   --namespace WebEnglishMetrics \
+  --statistic Average \
+  --period 300 \
   --threshold 80 \
   --comparison-operator GreaterThanThreshold \
   --evaluation-periods 1 \
-  --period 300 \
-  --statistic Average \
-  --alarm-actions arn:aws:sns:<region>:<account-id>:WebEnglishAlerts
+  --alarm-actions arn:aws:sns:ap-northeast-1:466322313916:WebEnglishAlerts
+```
+
+> 📌 Lưu ý:
+> - `--namespace` phải trùng với namespace trong CloudWatch Agent.
+> - `cpu_usage_active` là metric đã đẩy từ agent (nên kiểm tra bằng AWS Console > CloudWatch > Metrics).
+
+---
+
+## ✅ Bước 3: Gây tải CPU để kiểm tra Alarm
+
+```bash
+# Cài đặt stress nếu chưa có
+sudo amazon-linux-extras install epel -y
+sudo yum install stress -y
+
+# Gây tải CPU: 2 core trong 5 phút
+stress --cpu 2 --timeout 300
 ```
 
 ---
 
-### 3.3. Giám Sát Spring Boot
+## ✅ Bước 4: Kiểm tra Alarm
 
-#### Pom Dependency:
+- Truy cập: **AWS Console > CloudWatch > Alarms**
+- Kiểm tra alarm `HighCPUUsage` có chuyển sang trạng thái `ALARM` khi CPU vượt ngưỡng.
 
-```xml
-<dependency>
-  <groupId>io.micrometer</groupId>
-  <artifactId>micrometer-registry-cloudwatch</artifactId>
-  <version>1.9.0</version>
-</dependency>
-```
 
-#### Cấu hình `application.properties`
+## 6. Giám Sát MySQL Container
 
-```properties
-management.metrics.export.cloudwatch.namespace=WebEnglishAppMetrics
-management.metrics.export.cloudwatch.step=1m
-management.endpoints.web.exposure.include=metrics
-```
-
-#### Ví Dụ Java:
-
-```java
-@GetMapping("/example")
-public String example() {
-  meterRegistry.timer("webenglish.request.latency").record(() -> {
-    Thread.sleep(100);
-  });
-  return "Hello WebEnglish";
-}
-```
+Tài liệu này hướng dẫn chi tiết cách triển khai hệ thống giám sát cho container MySQL bằng cách gửi số lượng truy vấn lên Amazon CloudWatch Metrics và thiết lập cronjob tự động.
 
 ---
 
-### 3.4. Giám Sát MySQL Container
+## ✅ Bước 1: Cấu Hình MySQL Ghi Log Chậm *(tuỳ chọn)*
 
-#### Cấu Hình `mysql.cnf`
+Nếu muốn giám sát truy vấn chậm, thêm cấu hình dưới đây:
+
+### Sửa `docker-compose.yml`
+
+```yaml
+mysql:
+  image: mysql:8.0
+  container_name: mysql
+  environment:
+    MYSQL_ROOT_PASSWORD: 123456
+    MYSQL_DATABASE: webenglish
+  ports:
+    - "3306:3306"
+  volumes:
+    - ./mysql.cnf:/etc/mysql/conf.d/mysql.cnf
+```
+
+### Nội dung `mysql.cnf`
 
 ```ini
 [mysqld]
@@ -186,30 +216,102 @@ slow_query_log_file = /var/log/mysql/mysql-slow.log
 long_query_time = 1
 ```
 
-#### Gửi Metric MySQL:
+Khởi động lại container:
 
 ```bash
-#!/bin/bash
-QUERY_COUNT=$(mysql -uroot -proot -e "SHOW GLOBAL STATUS LIKE 'Queries';" | grep Queries | awk '{print $2}')
-aws cloudwatch put-metric-data \
-  --metric-name MySQLQueries \
-  --namespace WebEnglishMetrics \
-  --value $QUERY_COUNT \
-  --unit Count
-```
-
-#### Cron Job:
-
-```bash
-crontab -e
-* * * * * /path/to/mysql_metrics.sh
+docker restart mysql
 ```
 
 ---
 
-### 3.5. Tạo CloudWatch Dashboard
+## ✅ Bước 2: Tạo Bash Script Gửi Dữ Liệu Metric
 
-#### Cấu hình CLI mẫu:
+### Tạo file script:
+
+```bash
+sudo nano /home/ec2-user/mysql_metrics.sh
+```
+
+### Dán nội dung sau:
+
+```bash
+#!/bin/bash
+
+# Truy xuất số lượng truy vấn từ MySQL
+QUERY_COUNT=$(docker exec mysql mysql -uroot -p123456 -e "SHOW GLOBAL STATUS LIKE 'Queries';" | grep Queries | awk '{print $2}')
+
+# Gửi metric lên CloudWatch
+aws cloudwatch put-metric-data \
+  --metric-name MySQLQueries \
+  --namespace WebEnglishMetrics \
+  --value $QUERY_COUNT \
+  --unit Count \
+  --region ap-northeast-1
+```
+
+### Cấp quyền thực thi:
+
+```bash
+chmod +x /home/ec2-user/mysql_metrics.sh
+```
+
+---
+
+## ✅ Bước 3: Thiết Lập Cronjob
+
+```bash
+crontab -e
+```
+
+Thêm dòng sau:
+
+```bash
+* * * * * /home/ec2-user/mysql_metrics.sh >> /var/log/mysql-metric.log 2>&1
+```
+
+---
+
+## ✅ Bước 4: Kiểm Tra & Xác Nhận
+
+### Kiểm tra log thực thi:
+
+```bash
+tail -f /var/log/mysql-metric.log
+```
+
+### Kiểm tra trên CloudWatch:
+
+* Vào **CloudWatch > Metrics**
+* Chọn **Namespace: `WebEnglishMetrics`**
+* Kiểm tra `MySQLQueries`
+
+---
+
+## 🛠️ Tạo Alarm Cho MySQL Queries *(tuỳ chọn)*
+
+```bash
+aws cloudwatch put-metric-alarm \
+  --alarm-name HighMySQLQueries \
+  --metric-name MySQLQueries \
+  --namespace WebEnglishMetrics \
+  --threshold 10000 \
+  --comparison-operator GreaterThanThreshold \
+  --evaluation-periods 1 \
+  --period 300 \
+  --statistic Average \
+  --alarm-actions arn:aws:sns:ap-northeast-1:466322313916:WebEnglishAlerts
+```
+
+---
+
+## 📌 Ghi chú
+
+* Đảm bảo container `mysql` đang chạy.
+* Thay đổi mật khẩu và tên container nếu khác.
+* Cronjob chạy mỗi phút — có thể điều chỉnh tần suất theo nhu cầu.
+---
+
+## 7. Tạo Dashboard CloudWatch
 
 ```json
 {
@@ -218,19 +320,18 @@ crontab -e
       "type": "metric",
       "x": 0, "y": 0, "width": 12, "height": 6,
       "properties": {
-        "metrics": [["WebEnglishMetrics", "cpu_usage_active"], ["WebEnglishMetrics", "mem_used_percent"]],
-        "region": "us-east-1",
-        "title": "Hiệu suất EC2",
-        "view": "timeSeries"
+        "metrics": [["WebEnglishMetrics", "cpu_usage_active"]],
+        "region": "ap-northeast-1",
+        "title": "CPU EC2 Usage"
       }
     },
     {
       "type": "log",
       "x": 12, "y": 0, "width": 12, "height": 6,
       "properties": {
-        "query": "SOURCE 'WebEnglishLogs' | fields @message | filter @logStream like 'app.log'",
-        "region": "us-east-1",
-        "title": "Nhật ký Ứng dụng"
+        "query": "SOURCE 'WebEnglishLogs' | filter @logStream like 'app'",
+        "region": "ap-northeast-1",
+        "title": "App Logs"
       }
     }
   ]
@@ -239,39 +340,30 @@ crontab -e
 
 ---
 
-## 4. Kiểm Thử
+## 8. Kiểm Thử và Xử Lý Sự Cố
 
-* **Kiểm thử đơn vị:** Kiểm tra CloudWatch Agent và chỉ số ứng dụng.
-* **Kiểm thử tích hợp:** Giám sát cảnh báo SNS, log xuất hiện.
-* **Hiệu suất:** `stress-ng --cpu 4 --timeout 600s`
-* **Mô phỏng lỗi:** tạo truy vấn chậm hoặc lỗi 500 từ Spring Boot.
+```bash
+sudo stress-ng --cpu 4 --timeout 300s
+```
 
----
-
-## 5. Thực Tiễn Tốt Nhất
-
-* Nhật ký: Giới hạn lưu trữ 7–14 ngày.
-* Chỉ số: Gửi mỗi 60 giây để tối ưu chi phí.
-* IAM: Chỉ cấp quyền cần thiết.
-* Cảnh báo: Điều chỉnh theo chu kỳ đánh giá thực tế.
-* Runbook: Ghi lại hướng xử lý lỗi phổ biến.
+| Vấn đề           | Nguyên nhân       | Giải pháp                      |
+| ---------------- | ----------------- | ------------------------------ |
+| Agent không chạy | Thiếu quyền IAM   | Gán đúng IAM Role              |
+| Không gửi log    | Sai đường dẫn log | Kiểm tra path trong config     |
+| Không có metric  | Config sai        | Kiểm tra json và restart agent |
 
 ---
 
-## 6. Xử Lý Sự Cố
+## 9. Gợi Ý Mở Rộng
 
-| Vấn đề             | Nguyên nhân            | Giải pháp                      |
-| ------------------ | ---------------------- | ------------------------------ |
-| Không thấy chỉ số  | Agent lỗi, thiếu quyền | Kiểm tra IAM và cấu hình Agent |
-| Không có log       | Sai đường dẫn          | Kiểm tra đường dẫn tệp log     |
-| Cảnh báo không gửi | Cấu hình SNS sai       | Kiểm tra ARN và ngưỡng         |
-| Chi phí cao        | Lưu log quá lâu        | Điều chỉnh retention log       |
+* Tích hợp với X-Ray, AWS DevOps Guru.
+* Sử dụng Lambda để phản ứng theo cảnh báo.
+* Giám sát ECS/RDS nếu sử dụng thêm các dịch vụ đó.
 
 ---
 
-## 7. Bước Tiếp Theo
+## 📌 Ghi Chú
 
-* Tích hợp AWS X-Ray để theo dõi request.
-* Kích hoạt AWS DevOps Guru.
-* Sử dụng AWS Lambda phản ứng tự động.
-* Mở rộng giám sát ECS/RDS nếu cần.
+* Amazon Linux 2 dùng `yum`, file agent ở `/opt/aws/amazon-cloudwatch-agent/`.
+* Kiểm tra log CloudWatch Agent:
+  `/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log`

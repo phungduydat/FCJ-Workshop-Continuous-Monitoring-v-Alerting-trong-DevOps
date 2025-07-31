@@ -6,88 +6,124 @@ chapter : false
 pre : " <b> 8. </b> "
 ---
 
-{{% notice info %}}
-**Port Forwarding** là mốt cách thức hữu ích để chuyển hướng lưu lượng mạng từ 1 địa chỉ IP - Port này sang 1 địa chỉ IP - Port khác. Với **Port Forwarding** chúng ta có thể truy cập một EC2 instance nằm trong private subnet từ máy trạm của chúng ta.
-{{% /notice %}}
+# ✅ Quy trình Vận hành & Tối ưu hóa (Operational Procedures & Optimization)
 
-Chúng ta sẽ cấu hình **Port Forwarding** cho kết nối RDP giữa máy của mình với **Private Windows Instance** nằm trong private subnet mà chúng ta đã tạo cho bài thực hành này.
+## 🔹 1. Thiết lập Runbook chuyên sâu
 
-![port-fwd](/images/arc-04.png) 
+**Runbook** là tài liệu hướng dẫn chi tiết từng bước xử lý cho các kịch bản lỗi phổ biến. Tài liệu nên bao gồm:
 
+| Kịch bản sự cố | Dấu hiệu nhận biết | Nguyên nhân phổ biến | Bước xử lý chi tiết | Người chịu trách nhiệm |
+|---------------|--------------------|-----------------------|---------------------|--------------------------|
+| CPU sử dụng 100% | Alarm CloudWatch “HighCPUUsage” | Do load đột biến từ người dùng | 1. Xác minh log ứng dụng <br> 2. Kiểm tra container ECS đang chạy <br> 3. Scale ECS service lên thêm 1 task | DevOps Engineer |
+| Mất kết nối DB | Ứng dụng trả về lỗi `500` <br> Alarm về `MySQLConnectionTimeout` | DB quá tải hoặc crash container | 1. Kiểm tra container MySQL <br> 2. Khởi động lại container <br> 3. Kiểm tra lại trạng thái từ dashboard | Backend Developer |
 
+> 📁 **Lưu trữ đề xuất**: `/runbook/webenglish/mysql-restart.md`
 
-#### Tạo IAM User có quyền kết nối SSM
+---
 
-1. Truy cập vào [giao diện quản trị dịch vụ IAM](https://console.aws.amazon.com/iamv2/home)
-  + Click **Users** , sau đó click **Add users**.
+## 🔹 2. Phân tích log với CloudWatch Log Insights
 
-![FWD](/images/5.fwd/001-fwd.png)
+### Câu lệnh truy vấn phổ biến
 
-2. Tại trang **Add user**.
-  + Tại mục **User name**, điền **Portfwd**.
-  + Click chọn **Access key - Programmatic access**.
-  + Click **Next: Permissions**.
-  
-![FWD](/images/5.fwd/002-fwd.png)
-
-3. Click **Attach existing policies directly**.
-  + Tại ô tìm kiếm , điền **ssm**.
-  + Click chọn **AmazonSSMFullAccess**.
-  + Click **Next: Tags**, click **Next: Reviews**.
-  + Click **Create user**.
-
-4. Lưu lại thông tin **Access key ID** và **Secret access key** để thực hiện cấu hình AWS CLI.
-
-#### Cài đặt và cấu hình AWS CLI và Session Manager Plugin 
-  
-Để thực hiện phần thực hành này, đảm bảo máy trạm của bạn đã cài [AWS CLI]() và [Session Manager Plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
-
-Bạn có thể tham khảo thêm bài thực hành về cài đặt và cấu hình AWS CLI [tại đây](https://000011.awsstudygroup.com/).
-
-{{%notice tip%}}
-Với Windows thì khi giải nén thư mục cài đặt **Session Manager Plugin** bạn hãy chạy file **install.bat** với quyền Administrator để thực hiện cài đặt.
-{{%/notice%}}
-
-#### Thực hiện Portforwarding 
-
-1. Chạy command dưới đây trong **Command Prompt** trên máy của bạn để cấu hình **Port Forwarding**.
-
-```
-  aws ssm start-session --target (your ID windows instance) --document-name AWS-StartPortForwardingSession --parameters portNumber="3389",localPortNumber="9999" --region (your region) 
-```
-{{%notice tip%}}
-
-Thông tin **Instance ID** của **Windows Private Instance** có thể tìm được khi bạn xem chi tiết máy chủ EC2 Windows Private Instance.
-
-{{%/notice%}}
-
-  + Câu lệnh ví dụ
-
-```
-C:\Windows\system32>aws ssm start-session --target i-06343d7377486760c --document-name AWS-StartPortForwardingSession --parameters portNumber="3389",localPortNumber="9999" --region ap-southeast-1
+**Truy tìm lỗi ứng dụng**
+```sql
+fields @timestamp, @message
+| filter @message like /Exception/ or /ERROR/
+| sort @timestamp desc
+| limit 20
 ```
 
-{{%notice warning%}}
+**Kiểm tra lỗi kết nối DB**
+```sql
+fields @timestamp, @message
+| filter @message like /Connection refused/ or /JDBC/
+| sort @timestamp desc
+| limit 50
+```
 
-Nếu câu lệnh của bạn báo lỗi như dưới đây : \
-SessionManagerPlugin is not found. Please refer to SessionManager Documentation here: http://docs.aws.amazon.com/console/systems-manager/session-manager-plugin-not-found\
-Chứng tỏ bạn chưa cài Session Manager Plugin thành công. Bạn có thể cần khởi chạy lại **Command Prompt** sau khi cài **Session Manager Plugin**.
+> 📌 Lưu các truy vấn mẫu để DevOps dễ tra cứu và chia sẻ nội bộ.
 
-{{%/notice%}}
+---
 
-2. Kết nối tới **Private Windows Instance** bạn đã tạo bằng công cụ **Remote Desktop** trên máy trạm của bạn.
-  + Tại mục Computer: điền **localhost:9999**.
+## 🔹 3. Triển khai Auto Scaling Service
 
+### ECS Fargate – Ví dụ cấu hình trong AWS CDK
 
-![FWD](/images/5.fwd/003-fwd.png)
+```ts
+service.autoScaleTaskCount({ maxCapacity: 5, minCapacity: 1 })
+  .scaleOnCpuUtilization('CpuScaling', {
+    targetUtilizationPercent: 60
+  });
+```
 
+### CloudWatch Alarm để kích hoạt auto scaling
 
-3. Quay trở lại giao diện quản trị của dịch vụ System Manager - Session Manager.
-  + Click tab **Session history**.
-  + Chúng ta sẽ thấy các session logs với tên Document là **AWS-StartPortForwardingSession**.
+- CPU Utilization ≥ 75% → scale-out
+- CPU Utilization ≤ 30% → scale-in
 
+---
 
-![FWD](/images/5.fwd/004-fwd.png)
+# ✅ Kiểm thử & Tối ưu hóa hệ thống
 
+## 🔹 1. Mô phỏng kịch bản lỗi
 
-Chúc mừng bạn đã hoàn tất bài thực hành hướng dẫn cách sử dụng Session Manager để kết nối cũng như lưu trữ các session logs trong S3 bucket. Hãy nhớ thực hiện bước dọn dẹp tài nguyên để tránh sinh chi phí ngoài ý muốn nhé.
+### CPU Spike
+
+```bash
+sudo yum install stress -y
+stress --cpu 2 --timeout 300
+```
+
+### Tạo lỗi ứng dụng
+
+```bash
+for i in {1..100}; do curl -s http://localhost:8080/ & done
+```
+
+### Mô phỏng crash MySQL
+
+```bash
+docker exec -it mysql_container pkill -9 mysqld
+```
+
+## 🔹 2. Quan sát và xác minh hệ thống
+
+- Cảnh báo CloudWatch có được kích hoạt?
+- SNS có gửi email đến đúng đối tượng?
+- Lambda hoặc Auto Scaling có phản hồi?
+- Log có ghi đầy đủ lỗi?
+
+## 🔹 3. Tinh chỉnh ngưỡng cảnh báo
+
+| Metric | Threshold ban đầu | Điều chỉnh đề xuất |
+|--------|-------------------|--------------------|
+| cpu_usage_active | > 80% | > 85% nếu có spike thường xuyên |
+| memory usage | > 75% | > 70% nếu ứng dụng Spring Boot memory-intensive |
+| MySQLQueries | > 1000/min | Điều chỉnh dựa trên traffic thực tế |
+
+---
+
+## 📈 Lợi ích & Báo cáo KPIs
+
+| Chỉ Số | Mục Tiêu |
+|--------|----------|
+| Thời gian phản hồi sự cố | < 10 phút |
+| % lỗi được phát hiện tự động | > 95% |
+| Thời gian xử lý log | < 3 phút |
+| False positive rate | < 5% |
+
+---
+
+## 📌 Gợi ý mở rộng
+
+- Tích hợp AWS DevOps Guru để phát hiện nguyên nhân lỗi (root cause).
+- Tự động gửi báo cáo định kỳ qua email bằng Amazon QuickSight + SNS.
+- Tự động xử lý lỗi bằng AWS Lambda hoặc AWS Systems Manager Run Command.
+
+---
+
+## 📚 Tài liệu tham khảo
+
+- [AWS CloudWatch Log Insights](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/AnalyzingLogData.html)
+- [Auto Scaling ECS](https://docs.aws.amazon.com/autoscaling/application/userguide/application-auto-scaling.html)
+- [AWS Runbook Template](https://aws.amazon.com/blogs/devops/using-aws-systems-manager-to-create-runbooks/)
